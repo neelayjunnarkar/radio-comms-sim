@@ -13,7 +13,7 @@ struct Packet {
     to: u8,
     from: u8,
     id: u8,
-    len: u8,
+    payload_len: u8,
     payload: String,
     checksum: u8,
 }
@@ -32,32 +32,47 @@ impl Radio {
         }
     }
 
-    fn transmit(&mut self, s: String) -> Result<(), String> {
-        let p = Packet {
+    fn packetize(&mut self, s: String) -> Option<Vec<Packet>> {
+        let mut packets = Vec::<Packet>::new();
+        packets.push(Packet {
             to: 1,
             from: 0,
             id: self.frame_id,
-            len: 0,
+            payload_len: 0,
             payload: s,
             checksum: 0,
-        };
+        });
+        Some(packets)
+    }
 
-        if let Ok(mut encoded_p) = serialize(&p) {
-            encoded_p[PACKET_LEN_IDX] = encoded_p.len() as u8 - 5; // whole length must be < 256
-                                                                   //TODO: break s into blocks and packetize and blocks individually
-
-            let len = encoded_p.len();
-            encoded_p[len - 1] = encoded_p.iter().fold(0, |acc, x| acc ^ x);
-
-            if let Err(_) = self.tx.send(encoded_p) {
-                return Err(String::from("failed to send"));
+    fn transmit(&mut self, s: String) -> Result<(), ()> {
+        if let Some(packets) = self.packetize(s) {
+            let encoded_packets = packets
+                .iter()
+                .map(|p| serialize(p))
+                .map(|encoded_p_res| {
+                    encoded_p_res.map(|mut encoded_p| {
+                        encoded_p[PACKET_LEN_IDX] = (encoded_p.len() - 5) as u8;
+                        encoded_p
+                    })
+                })
+                .map(|encoded_p_res| {
+                    encoded_p_res.map(|mut encoded_p| {
+                        let len = encoded_p.len();
+                        encoded_p[len - 1] = encoded_p.iter().fold(0, |acc, x| acc ^ x);
+                        encoded_p
+                    })
+                });
+            for encoded_packet_res in encoded_packets {
+                if let Ok(encoded_packet) = encoded_packet_res {
+                    if let Err(_) = self.tx.send(encoded_packet) {
+                        return Err(());
+                    }
+                }
             }
-
-            self.frame_id += 1;
-
             Ok(())
         } else {
-            Err(String::from("failed to serialize"))
+            Err(())
         }
     }
 }
