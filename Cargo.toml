@@ -1,0 +1,11 @@
+[package]
+name = "radio_comms_sim"
+version = "0.1.0"
+authors = ["Neelay Junnarkar <neelay.junnarkar@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+serde = "1.0"
+serde_derive = "1.0"
+bincode = "1.0.1"
+rand = "0.6.1"
