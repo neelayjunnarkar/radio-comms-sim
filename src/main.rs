@@ -7,6 +7,7 @@ extern crate rand;
 use bincode::{deserialize, serialize};
 use rand::distributions::{Bernoulli, Distribution};
 use std::sync::mpsc;
+use itertools::Itertools;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Packet {
@@ -34,14 +35,16 @@ impl Radio {
 
     fn packetize(&mut self, s: String) -> Option<Vec<Packet>> {
         let mut packets = Vec::<Packet>::new();
-        packets.push(Packet {
-            to: 1,
-            from: 0,
-            id: self.frame_id,
-            payload_len: 0,
-            payload: s,
-            checksum: 0,
-        });
+        for chunk in &s.chars().chunks(62) { // floor((256-5)/4) = 62
+            packets.push(Packet {
+                to: 1,
+                from: 0,
+                id: self.frame_id,
+                payload_len: 0, // set in transmit, after encoded
+                payload: chunk.collect::<String>(),
+                checksum: 0 // set in transmit, after encoded
+            });
+        }
         Some(packets)
     }
 
@@ -85,7 +88,7 @@ fn main() {
         for received in rx {
             if received.iter().fold(0, |acc, x| acc ^ x) == 0 {
                 if let Ok(decoded_p) = deserialize::<Packet>(&received) {
-                    println!("{:?}", received);
+                    // println!("{:?}", received);
                     println!("{:?}", decoded_p);
                 }
             } else {
@@ -95,5 +98,5 @@ fn main() {
         }
     });
 
-    radio.transmit("why not".to_string()).expect("failed tx");
+    radio.transmit("abcdefghijklmnopqrstuvwxyz1234567890 abcdefghijklmnopqrstuvwxyz1234567890 abcdefghijklmnopqrstuvwxyz1234567890 abcdefghijklmnopqrstuvwxyz1234567890 abcdefghijklmnopqrstuvwxyz1234567890".to_string()).expect("failed tx");
 }
