@@ -155,8 +155,46 @@ fn main() {
     });
 
     let rx_thread = std::thread::spawn(move || {
-        let buf: [u8; 2048] = [0; 2048];
+        enum RxState {
+            PreambleCheck,
+            Packet,
+        }
+        let mut buf: [u8; 2048] = [0; 2048];
+        let mut curr_idx = 0;
+        let mut rx_state = RxState::PreambleCheck;
+
         for received in rx_radio2 {
+            match rx_state {
+                RxState::PreambleCheck => {
+                    curr_idx = if received == preamble[curr_idx] {
+                        curr_idx + 1
+                    } else {
+                        0
+                    };
+                    if curr_idx == preamble.len() {
+                        rx_state = RxState::Packet;
+                        curr_idx = 0;
+                    }
+                }
+                RxState::Packet => {
+                    buf[curr_idx] = received;
+                    curr_idx += 1;
+                    if curr_idx > PACKET_LEN_IDX
+                        && curr_idx >= (buf[PACKET_LEN_IDX] as usize) + 5 + 1
+                    {
+                        if buf.iter().take(curr_idx).fold(0, |acc, x| acc ^ x) == 0 {
+                            if let Ok(decoded_packet) = deserialize::<Packet>(&buf[0..curr_idx]) {
+                                println!("{:?}", decoded_packet);
+                            } else {
+                                println!("failed to deserialize");
+                            }
+                        } else {
+                            println!("checksum failed");
+                        }
+                        rx_state = RxState::PreambleCheck;
+                    }
+                }
+            }
             // if received.iter().fold(0, |acc, x| acc ^ x) == 0 {
             //     if let Ok(decoded_p) = deserialize::<Packet>(&received) {
             //         // println!("{:?}", received);
