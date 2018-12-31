@@ -181,9 +181,7 @@ fn main() {
                 RxState::Packet => {
                     buf[curr_idx] = received;
                     curr_idx += 1;
-                    if curr_idx > PACKET_LEN_IDX
-                        && curr_idx >= (buf[PACKET_LEN_IDX] as usize) + 5
-                    {
+                    if curr_idx > PACKET_LEN_IDX && curr_idx >= (buf[PACKET_LEN_IDX] as usize) + 5 {
                         if buf.iter().take(curr_idx).fold(0, |acc, x| acc ^ x) == 0 {
                             if let Ok(decoded_packet) = deserialize::<Packet>(&buf[0..curr_idx]) {
                                 println!("{:?}", decoded_packet);
@@ -201,15 +199,23 @@ fn main() {
         }
     });
 
-    radio.transmit("transmissions begin now".to_string()).expect("failed tx");
+    radio
+        .transmit("transmissions begin now".to_string())
+        .expect("failed tx");
 
-    radio.transmit("abcdefghijklmnopqrstuvwxyz1234567890 abcdefghijklmnopqrstuvwxyz1234567890
-    abcdefghijklmnopqrstuvwxyz1234567890 ".to_string()).expect("failed tx");
-    
-    radio.transmit("transmissions end now".to_string()).expect("failed tx");
+    radio
+        .transmit(
+            "abcdefghijklmnopqrstuvwxyz1234567890 abcdefghijklmnopqrstuvwxyz1234567890
+    abcdefghijklmnopqrstuvwxyz1234567890 "
+                .to_string(),
+        )
+        .expect("failed tx");
+
+    radio
+        .transmit("transmissions end now".to_string())
+        .expect("failed tx");
 
     std::thread::sleep(std::time::Duration::from_millis(1000));
     rx_thread.join().expect("failed to join rx thread");
     medium_thread.join().expect("failed to join medium thread");
 }
- 
