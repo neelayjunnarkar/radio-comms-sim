@@ -6,9 +6,17 @@ extern crate rand;
 
 use bincode::{deserialize, serialize};
 use itertools::Itertools;
-use rand::distributions::{Bernoulli, Distribution, Uniform};
+use rand::distributions::{Distribution, Uniform};
 use std::collections::VecDeque;
 use std::sync::mpsc;
+
+use portaudio as pa;
+use std::f64::consts::PI;
+
+const CHANNELS: i32 = 2;
+const SAMPLE_RATE: f64 = 10000.0;
+const FRAMES_PER_BUFFER: u32 = 64;
+const TABLE_SIZE: usize = 10000;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Packet {
@@ -73,6 +81,13 @@ impl Radio {
                         // println!("checksum: {}", encoded_p[len -1]);
                         encoded_p
                     })
+                })
+                .map(|encoded_p_res| {
+                    encoded_p_res.map(|encoded_p| encoded_p.iter().map(|&byte| unpack_byte(byte))
+                                      .collect::<Vec<[u8;8]>>())
+                })
+                .map(|encoded_p_res| {
+                    encoded_p_res.map(|encoded_p| flatten(encoded_p))
                 });
             for encoded_packet_res in encoded_packets {
                 if let Ok(encoded_packet) = encoded_packet_res {
@@ -115,7 +130,6 @@ fn main() {
         let mut buf: VecDeque<Vec<u8>> = VecDeque::new();
         let mut curr_packet: Option<Vec<u8>> = None;
         loop {
-            // push new received packets to buf
             while let Ok(packet) = rx_medium.try_recv() {
                 buf.push_back(packet);
             }
@@ -154,6 +168,7 @@ fn main() {
                     }
                 }
             }
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     });
 
@@ -162,28 +177,36 @@ fn main() {
             PreambleCheck,
             Packet,
         }
+        let mut byte_buf: [u8; 8] = [0; 8];
         let mut buf: [u8; 2048] = [0; 2048];
-        let mut curr_idx = 0;
+        let mut curr_buf_idx = 0;
+        let mut curr_byte_idx = 0;
         let mut rx_state = RxState::PreambleCheck;
         for received in rx_radio2 {
             match rx_state {
                 RxState::PreambleCheck => {
-                    curr_idx = if received == preamble[curr_idx] {
-                        curr_idx + 1
+                    curr_buf_idx = if received == preamble[curr_buf_idx] {
+                        curr_buf_idx + 1
                     } else {
                         0
                     };
-                    if curr_idx == preamble.len() {
+                    if curr_buf_idx == preamble.len() {
                         rx_state = RxState::Packet;
-                        curr_idx = 0;
+                        curr_buf_idx = 0;
+                        curr_byte_idx = 0;
                     }
                 }
                 RxState::Packet => {
-                    buf[curr_idx] = received;
-                    curr_idx += 1;
-                    if curr_idx > PACKET_LEN_IDX && curr_idx >= (buf[PACKET_LEN_IDX] as usize) + 5 {
-                        if buf.iter().take(curr_idx).fold(0, |acc, x| acc ^ x) == 0 {
-                            if let Ok(decoded_packet) = deserialize::<Packet>(&buf[0..curr_idx]) {
+                    byte_buf[curr_byte_idx] = received;
+                    curr_byte_idx += 1;
+                    if curr_byte_idx == 8 {
+                        buf[curr_buf_idx] = pack_byte(byte_buf);
+                        curr_buf_idx += 1;
+                        curr_byte_idx = 0;
+                    }
+                    if curr_buf_idx > PACKET_LEN_IDX && curr_buf_idx >= (buf[PACKET_LEN_IDX] as usize) + 5 {
+                        if buf.iter().take(curr_buf_idx).fold(0, |acc, x| acc ^ x) == 0 {
+                            if let Ok(decoded_packet) = deserialize::<Packet>(&buf[0..curr_buf_idx]) {
                                 println!("{:?}", decoded_packet);
                             } else {
                                 println!("failed to deserialize");
@@ -192,7 +215,8 @@ fn main() {
                             println!("checksum failed");
                         }
                         rx_state = RxState::PreambleCheck;
-                        curr_idx = 0;
+                        curr_buf_idx = 0;
+                        curr_byte_idx = 0;
                     }
                 }
             }
@@ -219,3 +243,38 @@ fn main() {
     rx_thread.join().expect("failed to join rx thread");
     medium_thread.join().expect("failed to join medium thread");
 }
+
+fn unpack_byte(input: u8) -> [u8; 8] {
+    let mut out = [0, 0, 0, 0, 0, 0, 0, 0];
+    out[0] = (input >> 0) & 1;
+    out[1] = (input >> 1) & 1;
+    out[2] = (input >> 2) & 1;
+    out[3] = (input >> 3) & 1;
+    out[4] = (input >> 4) & 1;
+    out[5] = (input >> 5) & 1;
+    out[6] = (input >> 6) & 1;
+    out[7] = (input >> 7) & 1;
+    out
+}
+
+fn pack_byte(arr: [u8; 8]) -> u8 {
+   (arr[0] << 0)
+       | (arr[1] << 1)
+       | (arr[2] << 2)
+       | (arr[3] << 3)
+       | (arr[4] << 4)
+       | (arr[5] << 5)
+       | (arr[6] << 6)
+       | (arr[7] << 7)
+}
+
+fn flatten(vec: Vec<[u8; 8]>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(vec.len()*8);
+    for arr in vec.iter() {
+        for &byte in arr.iter() {
+            out.push(byte);
+        }
+    }
+    out
+}
+
