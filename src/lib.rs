@@ -49,7 +49,7 @@ pub fn start() -> Result<(), String> {
     }
 }
 
-pub fn transmit(s: String, to: u8) -> Result<(), ()> {
+pub fn transmit(s: String, to: u8) -> Result<(), String> {
     tx::transmit(s, to)
 }
 
