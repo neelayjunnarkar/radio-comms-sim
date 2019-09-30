@@ -21,57 +21,47 @@ fn packetize(s: String, to: u8, frame_id: &mut u8) -> Result<Vec<Packet>, String
 }
 
 pub fn transmit(s: String, to: u8) -> Result<(), String> {
-    if let Ok(mut radio_guard) = RADIO.lock() {
-        if let Some(ref mut radio) = *radio_guard {
-            if let Ok(packets) = packetize(s, to, &mut (*radio).frame_id) {
-                println!("ok packets from packetization");
-                let encoded_packets = packets
+    let mut radio_guard = RADIO.lock().expect("Failed to lock radio mutex");
+    let ref mut radio = (radio_guard.as_mut()).expect("Radio not initialized");
+    let packets = packetize(s, to, &mut radio.frame_id).expect("Failed to packetize string");
+    println!("ok packets from packetization");
+    let encoded_packets = packets
+        .iter()
+        .map(|p| serialize(p))
+        .map(|encoded_p_res| {
+            // set payload len
+            encoded_p_res.map(|mut encoded_p| {
+                encoded_p[PACKET_LEN_IDX] = (encoded_p.len() - 5) as u8;
+                encoded_p
+            })
+        })
+        .map(|encoded_p_res| {
+            // set checksum
+            encoded_p_res.map(|mut encoded_p| {
+                let len = encoded_p.len();
+                encoded_p[len - 1] = encoded_p.iter().fold(0, |acc, x| acc ^ x);
+                encoded_p
+            })
+        })
+        .map(|encoded_p_res| {
+            encoded_p_res.map(|encoded_p| {
+                encoded_p
                     .iter()
-                    .map(|p| serialize(p))
-                    .map(|encoded_p_res| {
-                        // set payload len
-                        encoded_p_res.map(|mut encoded_p| {
-                            encoded_p[PACKET_LEN_IDX] = (encoded_p.len() - 5) as u8;
-                            encoded_p
-                        })
-                    })
-                .map(|encoded_p_res| {
-                    // set checksum
-                    encoded_p_res.map(|mut encoded_p| {
-                        let len = encoded_p.len();
-                        encoded_p[len - 1] = encoded_p.iter().fold(0, |acc, x| acc ^ x);
-                        encoded_p
-                    })
-                })
-                .map(|encoded_p_res| {
-                    encoded_p_res.map(|encoded_p| {
-                        encoded_p
-                            .iter()
-                            .map(|&byte| unpack_byte(byte))
-                            .collect::<Vec<[u8; 8]>>()
-                    })
-                })
-                .map(|encoded_p_res| encoded_p_res.map(|encoded_p| flatten(encoded_p)));
-                for encoded_packet_res in encoded_packets {
-                    if let Ok(encoded_packet) = encoded_packet_res {
-                        println!("sending packet to audio thread");
-                        if let Err(_) = (*radio).tx.send(encoded_packet) {
-                            return Err(
-                                "Error: failed to send encoded packet across channel".to_owned()
-                                );
-                        }
-                    }
-                }
-                Ok(())
-            } else {
-                Err("Error: failed to packetize string".to_owned())
-            }
-        } else {
-            Err("Error: radio not initialized".to_owned())
+                    .map(|&byte| unpack_byte(byte))
+                    .collect::<Vec<[u8; 8]>>()
+            })
+        })
+        .map(|encoded_p_res| encoded_p_res.map(|encoded_p| flatten(encoded_p)));
+    for encoded_packet_res in encoded_packets {
+        if let Ok(encoded_packet) = encoded_packet_res {
+            println!("sending packet to audio thread");
+            radio
+                .tx
+                .send(encoded_packet)
+                .expect("Failed to send encoded packet across channel");
         }
-    } else {
-        Err("Error: failed to lock radio mutex".to_owned())
     }
+    Ok(())
 }
 
 fn unpack_byte(input: u8) -> [u8; 8] {

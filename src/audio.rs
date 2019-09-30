@@ -1,8 +1,8 @@
-use super::{PREAMBLE, SEND_INTERVAL_MS, CHANNELS, SAMPLE_RATE, FRAMES_PER_BUFFER, TABLE_SIZE};
-use std::collections::VecDeque;
-use std::sync::{mpsc};
+use super::{CHANNELS, FRAMES_PER_BUFFER, PREAMBLE, SAMPLE_RATE, SEND_INTERVAL_MS, TABLE_SIZE};
 use portaudio as pa;
+use std::collections::VecDeque;
 use std::f64::consts::PI;
+use std::sync::mpsc;
 
 #[derive(PartialEq)]
 enum TxState {
@@ -31,17 +31,11 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
     let sine_1 = sine_1;
 
     let mut phase = 0;
-    let pa = pa::PortAudio::new();
-    if pa.is_err() {
-        return Err("Error: failed to initialize portaudio".to_owned());
-    }
-    let pa = pa.unwrap();
+    let pa = pa::PortAudio::new().expect("failed to initialize portaudio");
 
-    let pa_cfg = pa.default_output_stream_settings(CHANNELS, SAMPLE_RATE, FRAMES_PER_BUFFER);
-    if pa_cfg.is_err() {
-        return Err("Error: failied to create stream settings".to_owned());
-    }
-    let pa_cfg = pa_cfg.unwrap();
+    let pa_cfg = pa
+        .default_output_stream_settings(CHANNELS, SAMPLE_RATE, FRAMES_PER_BUFFER)
+        .expect("Failed to create portaudio stream settings");
 
     let sines = [sine_0, sine_1];
     let mut sines_idx = 0;
@@ -49,8 +43,7 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
     let (tx_note, rx_note) = mpsc::channel();
 
     let mut last_note_idx = 0;
-    let cb = move |pa::OutputStreamCallbackArgs {buffer, frames, ..}| {
-
+    let cb = move |pa::OutputStreamCallbackArgs { buffer, frames, .. }| {
         last_note_idx = if let Ok(sines_idx) = rx_note.try_recv() {
             sines_idx
         } else {
@@ -60,7 +53,7 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
         let mut idx = 0;
         for _ in 0..frames {
             buffer[idx] = sines[last_note_idx][phase];
-            buffer[idx+1] = sines[last_note_idx][phase];
+            buffer[idx + 1] = sines[last_note_idx][phase];
             phase += 1;
             if phase >= TABLE_SIZE {
                 phase -= TABLE_SIZE;
@@ -70,22 +63,17 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
         pa::Continue
     };
 
-    let mut stream = pa.open_non_blocking_stream(pa_cfg, cb);
-    if stream.is_err() {
-        return Err("Error: failed to open non-blocking stream".to_owned());
-    }
-    let mut stream = stream.unwrap();
+    let mut stream = pa
+        .open_non_blocking_stream(pa_cfg, cb)
+        .expect("Failed to open non-blocking stream");
 
-    if stream.start().is_err() {
-        return Err("Error: failed to start stream".to_owned());
-    }
-
+    stream.start().expect("Failed to start stream");
 
     loop {
         tx_note.send(sines_idx).unwrap_or(());
-        
+
         while let Ok(packet) = rx.try_recv() {
-            println!("received packet");
+            println!("received packet to send");
             buf.push_back(packet);
         }
 
@@ -123,4 +111,3 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(SEND_INTERVAL_MS));
     }
 }
-
