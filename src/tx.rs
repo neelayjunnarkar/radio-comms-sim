@@ -56,7 +56,7 @@ pub fn transmit(s: String, to: u8) -> Result<(), String> {
         if let Ok(encoded_packet) = encoded_packet_res {
             println!("sending packet to audio thread");
             radio
-                .tx
+                .audio_out_tx
                 .send(encoded_packet)
                 .expect("Failed to send encoded packet across channel");
         }

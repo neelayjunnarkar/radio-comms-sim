@@ -1,4 +1,4 @@
-use super::{CHANNELS, FRAMES_PER_BUFFER, PREAMBLE, SAMPLE_RATE, SEND_INTERVAL_MS, TABLE_SIZE};
+use super::{INTERLEAVED, CHANNELS, FRAMES_PER_BUFFER, PREAMBLE, SAMPLE_RATE, SEND_INTERVAL_MS, TABLE_SIZE};
 use portaudio as pa;
 use std::collections::VecDeque;
 use std::f64::consts::PI;
@@ -11,12 +11,11 @@ enum TxState {
     NoTx,
 }
 
-pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
+pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<Vec<f32>>) -> Result<(), String> {
     let mut buf: VecDeque<Vec<u8>> = VecDeque::new();
     let mut curr_packet: Option<Vec<u8>> = None;
     let mut tx_state: TxState = TxState::NoTx;
-    let mut counter = 0;
-
+    let mut counter = 0; 
     /* set up portaudio */
     let note_0 = 440.0;
     let note_1 = 560.0;
@@ -29,13 +28,29 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
     }
     let sine_0 = sine_0;
     let sine_1 = sine_1;
-
     let mut phase = 0;
+
     let pa = pa::PortAudio::new().expect("failed to initialize portaudio");
 
-    let pa_cfg = pa
-        .default_output_stream_settings(CHANNELS, SAMPLE_RATE, FRAMES_PER_BUFFER)
-        .expect("Failed to create portaudio stream settings");
+    let def_input = pa
+        .default_input_device()
+        .expect("failed to find input device");
+    let input_info = pa.device_info(def_input).expect("failed to get input info");
+    let in_latency = input_info.default_low_input_latency;
+    let input_params = pa::StreamParameters::<f32>::new(def_input, CHANNELS, INTERLEAVED, in_latency);
+
+    let def_output = pa
+        .default_output_device()
+        .expect("failed to find output device");
+    let output_info = pa
+        .device_info(def_output)
+        .expect("failed to get output info");
+    let out_latency = output_info.default_low_output_latency;
+    let output_params = pa::StreamParameters::new(def_output, CHANNELS, INTERLEAVED, out_latency);
+
+    pa.is_duplex_format_supported(input_params, output_params, SAMPLE_RATE)
+        .expect("no duplex support");
+    let pa_cfg = pa::DuplexStreamSettings::new(input_params, output_params, SAMPLE_RATE, FRAMES_PER_BUFFER);
 
     let sines = [sine_0, sine_1];
     let mut sines_idx = 0;
@@ -43,17 +58,26 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
     let (tx_note, rx_note) = mpsc::channel();
 
     let mut last_note_idx = 0;
-    let cb = move |pa::OutputStreamCallbackArgs { buffer, frames, .. }| {
+    let cb = move |pa::DuplexStreamCallbackArgs {
+                       in_buffer, 
+                       out_buffer,
+                       frames,
+                       time,
+                       ..
+                   }| {
         last_note_idx = if let Ok(sines_idx) = rx_note.try_recv() {
             sines_idx
         } else {
             last_note_idx
         };
 
+        assert!(frames == FRAMES_PER_BUFFER as usize);
+        audio_in_tx.send(in_buffer.to_vec());
+
         let mut idx = 0;
         for _ in 0..frames {
-            buffer[idx] = sines[last_note_idx][phase];
-            buffer[idx + 1] = sines[last_note_idx][phase];
+            out_buffer[idx] = sines[last_note_idx][phase];
+            out_buffer[idx + 1] = sines[last_note_idx][phase];
             phase += 1;
             if phase >= TABLE_SIZE {
                 phase -= TABLE_SIZE;
@@ -72,7 +96,7 @@ pub fn start(rx: mpsc::Receiver<Vec<u8>>) -> Result<(), String> {
     loop {
         tx_note.send(sines_idx).unwrap_or(());
 
-        while let Ok(packet) = rx.try_recv() {
+        while let Ok(packet) = audio_out_rx.try_recv() {
             println!("received packet to send");
             buf.push_back(packet);
         }

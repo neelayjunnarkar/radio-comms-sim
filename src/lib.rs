@@ -9,6 +9,7 @@ use std::sync::{mpsc, Mutex};
 
 mod audio;
 mod tx;
+mod rx;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Packet {
@@ -29,6 +30,7 @@ const CHANNELS: i32 = 2;
 const SAMPLE_RATE: f64 = 10000.0;
 const FRAMES_PER_BUFFER: u32 = 64;
 const TABLE_SIZE: usize = 10000;
+const INTERLEAVED: bool = true;
 
 const PREAMBLE: [u8; 256] = [
     1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1,
@@ -43,8 +45,10 @@ const PREAMBLE: [u8; 256] = [
 
 struct Radio {
     frame_id: u8,
-    tx: mpsc::Sender<Vec<u8>>,
+    audio_out_tx: mpsc::Sender<Vec<u8>>,
+    packet_rx: mpsc::Receiver<String>,
     audio_join_handle: std::thread::JoinHandle<Result<(), String>>,
+    receive_join_handle: std::thread::JoinHandle<Result<(), String>>,
 }
 
 lazy_static! {
@@ -54,12 +58,17 @@ lazy_static! {
 pub fn start() -> Result<(), String> {
     let mut radio_guard = RADIO.lock().expect("Failed to acquire lock on radio");
     if (*radio_guard).is_none() {
-        let (tx, rx) = mpsc::channel();
-        let audio_thread = std::thread::spawn(move || audio::start(rx));
+        let (audio_out_tx, audio_out_rx) = mpsc::channel();
+        let (audio_in_tx, audio_in_rx) = mpsc::channel();
+        let (packet_tx, packet_rx) = mpsc::channel();
+        let audio_thread = std::thread::spawn(move || audio::start(audio_out_rx, audio_in_tx));
+        let receive_thread = std::thread::spawn(move || rx::start(audio_in_rx, packet_tx));
         *radio_guard = Some(Radio {
             frame_id: 0,
-            tx: tx,
+            audio_out_tx: audio_out_tx,
+            packet_rx: packet_rx,
             audio_join_handle: audio_thread,
+            receive_join_handle: receive_thread
         });
         Ok(())
     } else {
@@ -69,6 +78,10 @@ pub fn start() -> Result<(), String> {
 
 pub fn transmit(s: String, to: u8) -> Result<(), String> {
     tx::transmit(s, to)
+}
+
+pub fn receive() -> Option<String> {
+    rx::receive()
 }
 
 #[cfg(test)]
