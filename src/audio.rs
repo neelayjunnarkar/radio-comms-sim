@@ -11,7 +11,7 @@ enum TxState {
     NoTx,
 }
 
-pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<Vec<f32>>) -> Result<(), String> {
+pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<[f32; FRAMES_PER_BUFFER as usize]>) -> Result<(), String> {
     let mut buf: VecDeque<Vec<u8>> = VecDeque::new();
     let mut curr_packet: Option<Vec<u8>> = None;
     let mut tx_state: TxState = TxState::NoTx;
@@ -62,7 +62,6 @@ pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<Ve
                        in_buffer, 
                        out_buffer,
                        frames,
-                       time,
                        ..
                    }| {
         last_note_idx = if let Ok(sines_idx) = rx_note.try_recv() {
@@ -72,7 +71,13 @@ pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<Ve
         };
 
         assert!(frames == FRAMES_PER_BUFFER as usize);
-        audio_in_tx.send(in_buffer.to_vec());
+        audio_in_tx.send({
+            let mut dst = [0.0; FRAMES_PER_BUFFER as usize];
+            for i in 0..FRAMES_PER_BUFFER as usize {
+                dst[i] = in_buffer[2*i];
+            }
+            dst
+        }).unwrap_or(());
 
         let mut idx = 0;
         for _ in 0..frames {

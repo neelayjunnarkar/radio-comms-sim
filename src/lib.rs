@@ -21,6 +21,8 @@ struct Packet {
     checksum: u8,
 }
 
+const IN_BUF_LEN: usize = 256 * 4;
+
 const PACKET_LEN_IDX: usize = 3;
 const PACKET_MAX_LEN: usize = 63; // floor(255/4) = 63 where max utf-8 char len is 4 bytes and 255 is max number representable by u8
 
@@ -28,7 +30,7 @@ const SEND_INTERVAL_MS: u64 = 10;
 
 const CHANNELS: i32 = 2;
 const SAMPLE_RATE: f64 = 10000.0;
-const FRAMES_PER_BUFFER: u32 = 64;
+const FRAMES_PER_BUFFER: u32 = 256;
 const TABLE_SIZE: usize = 10000;
 const INTERLEAVED: bool = true;
 
@@ -49,6 +51,8 @@ struct Radio {
     packet_rx: mpsc::Receiver<String>,
     audio_join_handle: std::thread::JoinHandle<Result<(), String>>,
     receive_join_handle: std::thread::JoinHandle<Result<(), String>>,
+    audio_in_buf: [f32; IN_BUF_LEN],
+    in_buf_next: usize,
 }
 
 lazy_static! {
@@ -68,7 +72,9 @@ pub fn start() -> Result<(), String> {
             audio_out_tx: audio_out_tx,
             packet_rx: packet_rx,
             audio_join_handle: audio_thread,
-            receive_join_handle: receive_thread
+            receive_join_handle: receive_thread,
+            audio_in_buf: [0.0; 1024],
+            in_buf_next: 0,
         });
         Ok(())
     } else {
