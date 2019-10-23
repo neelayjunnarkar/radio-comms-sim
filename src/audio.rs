@@ -1,4 +1,6 @@
-use super::{INTERLEAVED, CHANNELS, FRAMES_PER_BUFFER, PREAMBLE, SAMPLE_RATE, SEND_INTERVAL_MS, TABLE_SIZE};
+use super::{
+    CHANNELS, FRAMES_PER_BUFFER, INTERLEAVED, PREAMBLE, SAMPLE_RATE, SEND_INTERVAL_MS, TABLE_SIZE,
+};
 use portaudio as pa;
 use std::collections::VecDeque;
 use std::f64::consts::PI;
@@ -11,11 +13,14 @@ enum TxState {
     NoTx,
 }
 
-pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<[f32; FRAMES_PER_BUFFER as usize]>) -> Result<(), String> {
+pub fn start(
+    audio_out_rx: mpsc::Receiver<Vec<u8>>,
+    audio_in_tx: mpsc::Sender<[f32; FRAMES_PER_BUFFER as usize]>,
+) -> Result<(), String> {
     let mut buf: VecDeque<Vec<u8>> = VecDeque::new();
     let mut curr_packet: Option<Vec<u8>> = None;
     let mut tx_state: TxState = TxState::NoTx;
-    let mut counter = 0; 
+    let mut counter = 0;
     /* set up portaudio */
     let note_0 = 440.0;
     let note_1 = 560.0;
@@ -37,7 +42,8 @@ pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<[f
         .expect("failed to find input device");
     let input_info = pa.device_info(def_input).expect("failed to get input info");
     let in_latency = input_info.default_low_input_latency;
-    let input_params = pa::StreamParameters::<f32>::new(def_input, CHANNELS, INTERLEAVED, in_latency);
+    let input_params =
+        pa::StreamParameters::<f32>::new(def_input, CHANNELS, INTERLEAVED, in_latency);
 
     let def_output = pa
         .default_output_device()
@@ -50,7 +56,8 @@ pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<[f
 
     pa.is_duplex_format_supported(input_params, output_params, SAMPLE_RATE)
         .expect("no duplex support");
-    let pa_cfg = pa::DuplexStreamSettings::new(input_params, output_params, SAMPLE_RATE, FRAMES_PER_BUFFER);
+    let pa_cfg =
+        pa::DuplexStreamSettings::new(input_params, output_params, SAMPLE_RATE, FRAMES_PER_BUFFER);
 
     let sines = [sine_0, sine_1];
     let mut sines_idx = 0;
@@ -59,7 +66,7 @@ pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<[f
 
     let mut last_note_idx = 0;
     let cb = move |pa::DuplexStreamCallbackArgs {
-                       in_buffer, 
+                       in_buffer,
                        out_buffer,
                        frames,
                        ..
@@ -71,13 +78,15 @@ pub fn start(audio_out_rx: mpsc::Receiver<Vec<u8>>, audio_in_tx: mpsc::Sender<[f
         };
 
         assert!(frames == FRAMES_PER_BUFFER as usize);
-        audio_in_tx.send({
-            let mut dst = [0.0; FRAMES_PER_BUFFER as usize];
-            for i in 0..FRAMES_PER_BUFFER as usize {
-                dst[i] = in_buffer[2*i];
-            }
-            dst
-        }).unwrap_or(());
+        audio_in_tx
+            .send({
+                let mut dst = [0.0; FRAMES_PER_BUFFER as usize];
+                for i in 0..FRAMES_PER_BUFFER as usize {
+                    dst[i] = in_buffer[2 * i];
+                }
+                dst
+            })
+            .unwrap_or(());
 
         let mut idx = 0;
         for _ in 0..frames {

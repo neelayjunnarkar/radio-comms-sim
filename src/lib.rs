@@ -8,8 +8,8 @@ extern crate lazy_static;
 use std::sync::{mpsc, Mutex};
 
 mod audio;
-mod tx;
 mod rx;
+mod tx;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Packet {
@@ -21,7 +21,8 @@ struct Packet {
     checksum: u8,
 }
 
-const IN_BUF_LEN: usize = 256 * 4;
+const IN_BUF_LEN: usize = 2048;
+const FFT_BUF_LEN: usize = 1024;
 
 const PACKET_LEN_IDX: usize = 3;
 const PACKET_MAX_LEN: usize = 63; // floor(255/4) = 63 where max utf-8 char len is 4 bytes and 255 is max number representable by u8
@@ -73,7 +74,7 @@ pub fn start() -> Result<(), String> {
             packet_rx: packet_rx,
             audio_join_handle: audio_thread,
             receive_join_handle: receive_thread,
-            audio_in_buf: [0.0; 1024],
+            audio_in_buf: [0.0; IN_BUF_LEN],
             in_buf_next: 0,
         });
         Ok(())
